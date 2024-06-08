@@ -10,7 +10,7 @@ describe("StoreValue contract", () => {
     const storeValue = await StoreValue.deploy(owner);
 
     const TestERC20 = await hre.ethers.getContractFactory("TestERC20");
-    const testERC20 = await TestERC20.deploy();
+    const testERC20 = await TestERC20.deploy("TestToken", "TTK");
 
     return { owner, anotherAccount, storeValue, testERC20 };
   }

@@ -13,8 +13,7 @@ contract Arbitrator is StoreValue {
         address tokenIn,
         address tokenOut,
         uint amountIn,
-        uint amountOutMin,
-        uint deadline
+        uint amountOutMin
     ) private {
         IUniswapV2Router02 uniswapRouter = IUniswapV2Router02(router);
         require(
@@ -33,26 +32,33 @@ contract Arbitrator is StoreValue {
             amountOutMin,
             path,
             address(this),
-            deadline
+            block.timestamp + 300
         );
     }
 
     function executeArbitrage(
         address[] memory router,
-        address[] memory swaps,
         address[] memory tokens,
-        uint[] memory amounts,
-        uint[] memory deadlines
+        uint[] memory amounts
     ) public onlyOwner {
-        for (uint256 index = 0; index < swaps.length; index++) {
-            swapTokens(
-                router[index],
-                tokens[index],
-                tokens[index + 1],
-                amounts[index],
-                amounts[index + 1],
-                deadlines[index]
-            );
+        for (uint256 index = 0; index < tokens.length; index++) {
+            if (index == tokens.length - 1) {
+                swapTokens(
+                    router[index],
+                    tokens[index],
+                    tokens[0],
+                    amounts[index],
+                    amounts[index + 1]
+                );
+            } else {
+                swapTokens(
+                    router[index],
+                    tokens[index],
+                    tokens[index + 1],
+                    amounts[index],
+                    amounts[index + 1]
+                );
+            }
         }
     }
 }

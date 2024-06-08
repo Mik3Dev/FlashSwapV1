@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@uniswap/v2-periphery/contracts/UniswapV2Router02.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "hardhat/console.sol";
 
-contract TestUniswapV2Router02 is UniswapV2Router02 {
-    uint[] private _amounts = new uint[](2);
-    address[] private _path;
-    address private _to;
-    uint private _deadline;
-
-    constructor(
-        address _factory,
-        address _WETH
-    ) UniswapV2Router02(_factory, _WETH) {}
-
+contract TestUniswapV2Router02 {
     function swapExactTokensForTokens(
         uint amountIn,
         uint amountOutMin,
@@ -21,12 +12,17 @@ contract TestUniswapV2Router02 is UniswapV2Router02 {
         address to,
         uint deadline
     ) external returns (uint[] memory amounts) {
-        _path = path;
-        _to = to;
-        _deadline = deadline;
+        IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
+        IERC20(path[1]).transfer(to, amountOutMin);
 
-        _amounts[0] = amountIn;
-        _amounts[1] = amountOutMin;
-        return _amounts;
+        deadline = deadline;
+
+        console.log(amountIn);
+        console.log(amountOutMin);
+
+        amounts = new uint[](2);
+        amounts[0] = amountIn;
+        amounts[1] = amountOutMin;
+        return amounts;
     }
 }
