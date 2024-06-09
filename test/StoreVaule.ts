@@ -1,6 +1,8 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import hre from "hardhat";
 import { expect } from "chai";
+import { USDC_ADDR } from "../utils/addresses";
+import { ERC_20_ABI } from "../utils/erc20-abi";
 
 describe("StoreValue contract", () => {
   async function deployStoreValueContract() {
@@ -9,10 +11,36 @@ describe("StoreValue contract", () => {
     const StoreValue = await hre.ethers.getContractFactory("StoreValue");
     const storeValue = await StoreValue.deploy(owner);
 
-    const TestERC20 = await hre.ethers.getContractFactory("TestERC20");
-    const testERC20 = await TestERC20.deploy("TestToken", "TTK");
+    const oneEther = hre.ethers.parseEther("1");
+    const twoEthers = hre.ethers.parseEther("2");
+    const usdcContract = new hre.ethers.Contract(
+      USDC_ADDR,
+      ERC_20_ABI,
+      hre.ethers.provider
+    );
+    const usdcTokenHolder = await hre.ethers.getImpersonatedSigner(
+      "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503"
+    );
+    const usdcAmount = hre.ethers.parseUnits("1000", 6);
+    await usdcContract
+      .connect(usdcTokenHolder)
+      .transfer(await storeValue.getAddress(), usdcAmount);
 
-    return { owner, anotherAccount, storeValue, testERC20 };
+    await usdcContract
+      .connect(usdcTokenHolder)
+      .transfer(anotherAccount, usdcAmount);
+
+    await usdcContract.connect(usdcTokenHolder).transfer(owner, usdcAmount);
+
+    return {
+      owner,
+      anotherAccount,
+      storeValue,
+      oneEther,
+      twoEthers,
+      usdcContract,
+      usdcAmount,
+    };
   }
 
   describe("Deployment", () => {
@@ -32,19 +60,20 @@ describe("StoreValue contract", () => {
     });
 
     it("should return the correct balance", async () => {
-      const { storeValue, owner, anotherAccount } = await loadFixture(
-        deployStoreValueContract
-      );
+      const { storeValue, owner, anotherAccount, oneEther, twoEthers } =
+        await loadFixture(deployStoreValueContract);
+
       await owner.sendTransaction({
         to: await storeValue.getAddress(),
-        value: 1,
+        value: oneEther,
       });
-      expect(await storeValue.getBalance()).to.equal(1);
+      expect(await storeValue.getBalance()).to.equal(oneEther.toString());
+
       await anotherAccount.sendTransaction({
         to: await storeValue.getAddress(),
-        value: 1,
+        value: oneEther,
       });
-      expect(await storeValue.getBalance()).to.equal(2);
+      expect(await storeValue.getBalance()).to.equal(twoEthers.toString());
     });
 
     it("should show balance only to owner", async () => {
@@ -59,46 +88,48 @@ describe("StoreValue contract", () => {
 
   describe("Receiving ETH", () => {
     it("should receive ethers", async () => {
-      const { storeValue, owner, anotherAccount } = await loadFixture(
-        deployStoreValueContract
-      );
+      const { storeValue, owner, anotherAccount, oneEther, twoEthers } =
+        await loadFixture(deployStoreValueContract);
       await expect(
         owner.sendTransaction({
           to: await storeValue.getAddress(),
-          value: 1,
+          value: oneEther,
         })
       ).to.emit(storeValue, "ReceivedETH");
-      expect(await storeValue.getBalance()).to.equal(1);
+      expect(await storeValue.getBalance()).to.equal(oneEther.toString());
       await expect(
         anotherAccount.sendTransaction({
           to: await storeValue.getAddress(),
-          value: 1,
+          value: oneEther,
         })
       ).to.emit(storeValue, "ReceivedETH");
-      expect(await storeValue.getBalance()).to.equal(2);
+      expect(await storeValue.getBalance()).to.equal(twoEthers);
     });
   });
 
   describe("Withdraw ETH", () => {
-    it("should allow to withdraw eth to owner", async () => {
-      const { storeValue, owner } = await loadFixture(deployStoreValueContract);
-      const value = hre.ethers.parseEther("1");
+    it("should allow to withdraw ethers to owner", async () => {
+      const { storeValue, owner, oneEther } = await loadFixture(
+        deployStoreValueContract
+      );
       await owner.sendTransaction({
         to: await storeValue.getAddress(),
-        value,
+        value: oneEther,
       });
-      expect(await storeValue.getBalance()).to.equal(value);
-      await expect(storeValue.withdraw(value)).to.not.be.reverted;
+      expect(await storeValue.getBalance()).to.equal(oneEther.toString());
+      await expect(storeValue.withdraw(oneEther.toString())).to.not.be.reverted;
       expect(await storeValue.getBalance()).to.equal(0);
     });
 
     it("should emit events after receive and withdraw ETHs", async () => {
-      const { storeValue, owner } = await loadFixture(deployStoreValueContract);
-      const value = hre.ethers.parseEther("1");
+      const { storeValue, owner, oneEther } = await loadFixture(
+        deployStoreValueContract
+      );
+      const value = oneEther;
       await expect(
         owner.sendTransaction({
           to: await storeValue.getAddress(),
-          value,
+          value: value.toString(),
         })
       ).to.emit(storeValue, "ReceivedETH");
       await expect(storeValue.withdraw(value)).to.emit(
@@ -107,39 +138,38 @@ describe("StoreValue contract", () => {
       );
     });
 
-    it("should not allow withdraw eth another accounts", async () => {
-      const { storeValue, anotherAccount } = await loadFixture(
+    it("should not allow withdraw ethers another accounts", async () => {
+      const { storeValue, anotherAccount, oneEther } = await loadFixture(
         deployStoreValueContract
       );
-      const value = hre.ethers.parseEther("1");
       await anotherAccount.sendTransaction({
         to: await storeValue.getAddress(),
-        value,
+        value: oneEther,
       });
-      expect(await storeValue.getBalance()).to.equal(value);
-      await expect(storeValue.connect(anotherAccount).withdraw(value)).to.be
+      expect(await storeValue.getBalance()).to.equal(oneEther.toString());
+      await expect(storeValue.connect(anotherAccount).withdraw(oneEther)).to.be
         .reverted;
-      expect(await storeValue.getBalance()).to.equal(value);
+      expect(await storeValue.getBalance()).to.equal(oneEther.toString());
     });
   });
 
   describe("Token Balance", () => {
     it("should return correct balance", async () => {
-      const { storeValue, testERC20 } = await loadFixture(
+      const { storeValue, usdcContract, usdcAmount } = await loadFixture(
         deployStoreValueContract
       );
-      const erc20Address = await testERC20.getAddress();
-      const storeAddress = await storeValue.getAddress();
-      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(0);
-      await testERC20.transfer(storeAddress, 50);
-      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(50);
+
+      const erc20Address = await usdcContract.getAddress();
+      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(
+        usdcAmount
+      );
     });
 
     it("should not allow to get balance to not owner account", async () => {
-      const { anotherAccount, storeValue, testERC20 } = await loadFixture(
+      const { anotherAccount, storeValue, usdcContract } = await loadFixture(
         deployStoreValueContract
       );
-      const erc20Address = await testERC20.getAddress();
+      const erc20Address = await usdcContract.getAddress();
       await expect(
         storeValue.connect(anotherAccount).getTokenBalance(erc20Address)
       ).to.be.reverted;
@@ -148,65 +178,71 @@ describe("StoreValue contract", () => {
 
   describe("Receiving Token", () => {
     it("should receive tokens by owner", async () => {
-      const { owner, storeValue, testERC20 } = await loadFixture(
+      const { owner, storeValue, usdcContract } = await loadFixture(
         deployStoreValueContract
       );
       const storeAddress = await storeValue.getAddress();
-      await expect(testERC20.transfer(storeAddress, 50)).changeTokenBalances(
-        testERC20,
-        [owner, storeAddress],
-        [-50, 50]
-      );
+      await expect(
+        usdcContract.connect(owner).transfer(storeAddress, 50)
+      ).changeTokenBalances(usdcContract, [owner, storeAddress], [-50, 50]);
     });
 
     it("should receive tokens by another account", async () => {
-      const { anotherAccount, storeValue, testERC20 } = await loadFixture(
+      const { anotherAccount, storeValue, usdcContract } = await loadFixture(
         deployStoreValueContract
       );
+
       const storeAddress = await storeValue.getAddress();
-      await testERC20.transfer(anotherAccount, 100);
       await expect(
-        testERC20.connect(anotherAccount).transfer(storeAddress, 100)
+        usdcContract.connect(anotherAccount).transfer(storeAddress, 50)
       ).changeTokenBalances(
-        testERC20,
+        usdcContract,
         [anotherAccount, storeAddress],
-        [-100, 100]
+        [-50, 50]
       );
     });
   });
 
   describe("Withdrawal Token", () => {
     it("should allow withdraw to owner", async () => {
-      const { owner, storeValue, testERC20 } = await loadFixture(
+      const { owner, storeValue, usdcContract, usdcAmount } = await loadFixture(
         deployStoreValueContract
       );
-      const erc20Address = await testERC20.getAddress();
+
+      const withdrawalAmount = hre.ethers.parseUnits("500", 6);
+
       const storeAddress = await storeValue.getAddress();
-      await testERC20.transfer(storeAddress, 1000);
-      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(1000);
-      await expect(storeValue.withdrawTokens(erc20Address, 500)).to.emit(
-        storeValue,
-        "WithdrawnTokens"
+      const contractAddr = await usdcContract.getAddress();
+      expect(await storeValue.getTokenBalance(contractAddr)).to.equal(
+        usdcAmount
       );
-      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(500);
       await expect(
-        storeValue.withdrawTokens(erc20Address, 500)
-      ).to.changeTokenBalances(testERC20, [storeAddress, owner], [-500, 500]);
-      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(0);
+        storeValue.withdrawTokens(contractAddr, withdrawalAmount)
+      ).to.emit(storeValue, "WithdrawnTokens");
+
+      expect(await storeValue.getTokenBalance(contractAddr)).to.equal(
+        withdrawalAmount
+      );
+      await expect(
+        storeValue.withdrawTokens(contractAddr, withdrawalAmount)
+      ).to.changeTokenBalances(
+        usdcContract,
+        [storeAddress, owner],
+        [`-${withdrawalAmount.toString()}`, withdrawalAmount.toString()]
+      );
+      expect(await storeValue.getTokenBalance(contractAddr)).to.equal(0);
     });
 
     it("should not allow to withdraw token to another account", async () => {
-      const { anotherAccount, storeValue, testERC20 } = await loadFixture(
-        deployStoreValueContract
-      );
-      const erc20Address = await testERC20.getAddress();
-      const storeAddress = await storeValue.getAddress();
-      await testERC20.transfer(storeAddress, 1000);
-      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(1000);
+      const { anotherAccount, storeValue, usdcContract, usdcAmount } =
+        await loadFixture(deployStoreValueContract);
+      const erc20Address = await usdcContract.getAddress();
       await expect(
         storeValue.connect(anotherAccount).withdrawTokens(erc20Address, 500)
       ).to.be.reverted;
-      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(1000);
+      expect(await storeValue.getTokenBalance(erc20Address)).to.equal(
+        usdcAmount.toString()
+      );
     });
   });
 });
