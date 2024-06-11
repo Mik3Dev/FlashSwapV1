@@ -2,10 +2,10 @@
 pragma solidity ^0.8.20;
 
 import "@balancer-labs/v2-interfaces/contracts/vault/IVault.sol";
-import {IFlashLoanRecipient} from "@balancer-labs/v2-interfaces/contracts/vault/IFlashLoanRecipient.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
+import {IFlashLoanRecipient} from "@balancer-labs/v2-interfaces/contracts/vault/IFlashLoanRecipient.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
@@ -117,20 +117,27 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
     }
 
     function placeTrade(
-        string calldata _exchangeName,
+        string memory _exchangeName,
         address _fromToken,
         address _toToken,
-        uint256 _amountIn,
-        uint256 _amountOut
+        uint256 _amountIn
     ) private returns (uint256) {
-        address routerAddr = exchangesInfo[_exchangeName].router;
-        require(routerAddr != address(0), "Exchange not registered");
+        ExchangeInfo memory _exchange = exchangesInfo[_exchangeName];
+        require(_exchange.router != address(0), "Exchange not registered");
 
-        IUniswapV2Router02 router = IUniswapV2Router02(routerAddr);
+        address pair = IUniswapV2Factory(_exchange.factory).getPair(
+            _fromToken,
+            _toToken
+        );
+        require(pair != address(0), "Pool does not exist");
+
+        IUniswapV2Router02 router = IUniswapV2Router02(_exchange.router);
 
         address[] memory path = new address[](2);
         path[0] = _fromToken;
         path[1] = _toToken;
+
+        uint256 _amountOut = router.getAmountsOut(_amountIn, path)[1];
 
         uint256 deadline = block.timestamp + 1 hours;
 
@@ -146,114 +153,64 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         return amountReceived;
     }
 
-    // function swapTokens(
-    //     string memory _exchangeName,
-    //     address _tokenIn,
-    //     address _tokenOut,
-    //     uint256 _amountIn,
-    //     uint256 _amountOutMin
-    // ) private {
-    //     require(
-    //         exchangeRouters[_exchangeName] != address(0),
-    //         "Exchange router not registered"
-    //     );
-    //     IUniswapV2Router02 router = IUniswapV2Router02(
-    //         exchangeRouters[_exchangeName]
-    //     );
-
-    //     IERC20(_tokenIn).approve(address(router), _amountIn);
-
-    //     address[] memory path = new address[](2);
-    //     path[0] = _tokenIn;
-    //     path[1] = _tokenOut;
-
-    //     router.swapExactTokensForTokens(
-    //         _amountIn,
-    //         _amountOutMin,
-    //         path,
-    //         address(this),
-    //         block.timestamp + 1 days
-    //     );
-    // }
-
-    function executeArbitrage(
-        string[] calldata _exchangeNames,
-        address[] calldata _tokens,
-        uint256[] calldata _amounts
-    ) private {
-        require(_exchangeNames.length >= 2, "Invalid exchange Names length");
+    function startArbitrage(
+        string[] memory _exchangeNames,
+        address[] memory _tokens,
+        uint256 _amount // amount of token[0] (borrowed amount)
+    ) internal returns (uint256) {
+        require(_exchangeNames.length >= 2, "Invalid exchange names length");
         require(_tokens.length >= 2, "Invalid tokens address length");
-        require(_amounts.length >= 3, "Invalid amounts length");
         require(_exchangeNames.length == _tokens.length, "Invalid lengths");
-        require(
-            _exchangeNames.length == _amounts.length + 1,
-            "Invalid lengths"
-        );
+        require(_amount > 0, "Invalid borrowed amount");
 
         uint256 lastReceivedAmount;
 
         for (uint256 i = 0; i < _exchangeNames.length; i++) {
             if (i == _exchangeNames.length - 1) {
-                placeTrade(
+                lastReceivedAmount = placeTrade(
                     _exchangeNames[i],
                     _tokens[i],
                     _tokens[0],
-                    lastReceivedAmount,
-                    0
-                ); // TODO: change the last number;
+                    lastReceivedAmount
+                );
             } else {
                 lastReceivedAmount = lastReceivedAmount == 0
-                    ? _amounts[i]
+                    ? _amount
                     : lastReceivedAmount;
                 lastReceivedAmount = placeTrade(
                     _exchangeNames[i],
                     _tokens[i],
                     _tokens[i + 1],
-                    lastReceivedAmount,
-                    _amounts[i + 1]
+                    lastReceivedAmount
                 );
             }
         }
 
-        // require(_exchanges.length == 2, "Exchange list must have length 2");
-        // require(_tokens.length == 2, "Tokens list must have length 2");
-        // require(_amounts.length == 3, "Amount list must have length 3");
-
-        // swapTokens(
-        //     _exchanges[0],
-        //     _tokens[0],
-        //     _tokens[1],
-        //     _amounts[0],
-        //     _amounts[1]
-        // );
-
-        // swapTokens(
-        //     _exchanges[1],
-        //     _tokens[1],
-        //     _tokens[0],
-        //     _amounts[1],
-        //     _amounts[2]
-        // );
+        return lastReceivedAmount;
     }
 
     function flashSwap(
-        address _tokenToLoan,
-        uint256 _amountToLoan,
-        string[] memory _exchanges,
-        address[] memory _tokens,
-        uint256[] memory _amounts
+        string[] calldata _exchangeNames,
+        address[] calldata _tokens,
+        uint256 _amountToBorrow
     ) external onlyOwner {
-        require(_exchanges.length == 2, "Exchange list must have length 2");
-        require(_tokens.length == 2, "Tokens list must have length 2");
-        require(_amounts.length == 3, "Amount list must have length 3");
-        IERC20 token = IERC20(_tokenToLoan);
+        require(_exchangeNames.length >= 2, "Invalid exchange names length");
+        require(_tokens.length >= 2, "Invalid tokens address length");
+        require(_exchangeNames.length == _tokens.length, "Invalid lengths");
+        require(_amountToBorrow > 0, "Invalid borrowed amount");
 
-        bytes memory userData = abi.encode(_exchanges, _tokens, _amounts);
+        IERC20 token = IERC20(_tokens[0]);
+
+        bytes memory userData = abi.encode(
+            _exchangeNames,
+            _tokens,
+            _amountToBorrow
+        );
 
         IERC20[] memory tokens;
         tokens[0] = token;
         uint256[] memory amounts;
-        amounts[0] = _amountToLoan;
+        amounts[0] = _amountToBorrow;
 
         vault.flashLoan(this, tokens, amounts, userData);
     }
@@ -267,13 +224,20 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         require(msg.sender == address(vault), "Invalid vault address");
 
         (
-            string[] memory _exchanges,
+            string[] memory _exchangeNames,
             address[] memory _tokens,
-            uint256[] memory _amounts
-        ) = abi.decode(userData, (string[], address[], uint256[]));
-        // executeArbitrage(_exchanges, _tokens, _amounts);
+            uint256 _amountToBorrow
+        ) = abi.decode(userData, (string[], address[], uint256));
+        uint256 finalAmount = startArbitrage(
+            _exchangeNames,
+            _tokens,
+            _amountToBorrow
+        );
 
         uint256 amountToRepay = amounts[0] + feeAmounts[1];
+        require(finalAmount - amountToRepay > 0, "Non profitable arbitrage");
+
+        tokens[0].transfer(address(owner()), finalAmount - amountToRepay);
         tokens[0].transfer(address(vault), amountToRepay);
     }
 }
