@@ -12,7 +12,7 @@ contract BalancerFlashLoan is Ownable, IFlashLoanRecipient {
 
     constructor(address initialAddress) Ownable(initialAddress) {}
 
-    function makeFlashLoan(
+    function _makeFlashLoan(
         IERC20[] memory tokens,
         uint256[] memory amounts,
         bytes memory userData
@@ -26,7 +26,7 @@ contract BalancerFlashLoan is Ownable, IFlashLoanRecipient {
         uint256[] memory feeAmounts,
         bytes memory userData
     ) external override {
-        require(msg.sender == address(vault));
+        require(msg.sender == address(vault), "Invalid vault address");
 
         // Operaciones
         userData;
