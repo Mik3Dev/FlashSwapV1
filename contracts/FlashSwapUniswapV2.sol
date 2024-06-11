@@ -14,11 +14,16 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
     IVault private constant vault =
         IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
 
-    mapping(string => address) public exchangeRouters;
+    struct ExchangeInfo {
+        address router;
+        address factory;
+    }
+
+    mapping(string => ExchangeInfo) public exchangesInfo;
     string[] public exchanges;
 
     event ReceivedETH(address indexed sender, uint amount);
-    event WithdrawnETH(address indexed recipient, uint amount);
+    event WithdrawETH(address indexed recipient, uint amount);
     event ReceivedTokens(
         address indexed sender,
         address indexed token,
@@ -38,13 +43,17 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
 
     function addExchangeRouter(
         string memory _name,
-        address _routerAddress
+        address _routerAddress,
+        address _factoryAddress
     ) public onlyOwner {
         require(
-            exchangeRouters[_name] == address(0),
+            exchangesInfo[_name].router == address(0),
             "Aready registered exchange router"
         );
-        exchangeRouters[_name] = _routerAddress;
+        exchangesInfo[_name] = ExchangeInfo({
+            router: _routerAddress,
+            factory: _factoryAddress
+        });
         exchanges.push(_name);
     }
 
@@ -73,7 +82,7 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
     }
 
     function removeExchangeRouter(string memory _name) public onlyOwner {
-        delete exchangeRouters[_name];
+        delete exchangesInfo[_name];
         _removeExchangeName(_name);
     }
 
@@ -85,16 +94,16 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         return address(this).balance;
     }
 
-    function withdraw(uint _amount) public onlyOwner {
+    function withdraw(uint256 _amount) public onlyOwner {
         payable(msg.sender).transfer(_amount);
-        emit WithdrawnETH(msg.sender, _amount);
+        emit WithdrawETH(msg.sender, _amount);
     }
 
     function getTokenBalance(address token) public view returns (uint) {
         return IERC20(token).balanceOf(address(this));
     }
 
-    function receiveTokens(address token, uint amount) external payable {
+    function receiveTokens(address token, uint amount) public {
         require(
             IERC20(token).transferFrom(msg.sender, address(this), amount),
             "Transfer failed"
@@ -107,60 +116,124 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         emit WithdrawnTokens(msg.sender, token, amount);
     }
 
-    function swapTokens(
-        string memory _exchangeName,
-        address _tokenIn,
-        address _tokenOut,
+    function placeTrade(
+        string calldata _exchangeName,
+        address _fromToken,
+        address _toToken,
         uint256 _amountIn,
-        uint256 _amountOutMin
-    ) private {
-        require(
-            exchangeRouters[_exchangeName] != address(0),
-            "Exchange router not registered"
-        );
-        IUniswapV2Router02 router = IUniswapV2Router02(
-            exchangeRouters[_exchangeName]
-        );
+        uint256 _amountOut
+    ) private returns (uint256) {
+        address routerAddr = exchangesInfo[_exchangeName].router;
+        require(routerAddr != address(0), "Exchange not registered");
 
-        IERC20(_tokenIn).approve(address(router), _amountIn);
+        IUniswapV2Router02 router = IUniswapV2Router02(routerAddr);
 
         address[] memory path = new address[](2);
-        path[0] = _tokenIn;
-        path[1] = _tokenOut;
+        path[0] = _fromToken;
+        path[1] = _toToken;
 
-        router.swapExactTokensForTokens(
+        uint256 deadline = block.timestamp + 1 hours;
+
+        uint256 amountReceived = router.swapExactTokensForTokens(
             _amountIn,
-            _amountOutMin,
+            _amountOut,
             path,
             address(this),
-            block.timestamp + 1 days
-        );
+            deadline
+        )[1];
+
+        require(amountReceived > 0, "Aborted TX: Trade returned zero");
+        return amountReceived;
     }
 
+    // function swapTokens(
+    //     string memory _exchangeName,
+    //     address _tokenIn,
+    //     address _tokenOut,
+    //     uint256 _amountIn,
+    //     uint256 _amountOutMin
+    // ) private {
+    //     require(
+    //         exchangeRouters[_exchangeName] != address(0),
+    //         "Exchange router not registered"
+    //     );
+    //     IUniswapV2Router02 router = IUniswapV2Router02(
+    //         exchangeRouters[_exchangeName]
+    //     );
+
+    //     IERC20(_tokenIn).approve(address(router), _amountIn);
+
+    //     address[] memory path = new address[](2);
+    //     path[0] = _tokenIn;
+    //     path[1] = _tokenOut;
+
+    //     router.swapExactTokensForTokens(
+    //         _amountIn,
+    //         _amountOutMin,
+    //         path,
+    //         address(this),
+    //         block.timestamp + 1 days
+    //     );
+    // }
+
     function executeArbitrage(
-        string[] memory _exchanges,
-        address[] memory _tokens,
-        uint256[] memory _amounts
+        string[] calldata _exchangeNames,
+        address[] calldata _tokens,
+        uint256[] calldata _amounts
     ) private {
-        require(_exchanges.length == 2, "Exchange list must have length 2");
-        require(_tokens.length == 2, "Tokens list must have length 2");
-        require(_amounts.length == 3, "Amount list must have length 3");
-
-        swapTokens(
-            _exchanges[0],
-            _tokens[0],
-            _tokens[1],
-            _amounts[0],
-            _amounts[1]
+        require(_exchangeNames.length >= 2, "Invalid exchange Names length");
+        require(_tokens.length >= 2, "Invalid tokens address length");
+        require(_amounts.length >= 3, "Invalid amounts length");
+        require(_exchangeNames.length == _tokens.length, "Invalid lengths");
+        require(
+            _exchangeNames.length == _amounts.length + 1,
+            "Invalid lengths"
         );
 
-        swapTokens(
-            _exchanges[1],
-            _tokens[1],
-            _tokens[0],
-            _amounts[1],
-            _amounts[2]
-        );
+        uint256 lastReceivedAmount;
+
+        for (uint256 i = 0; i < _exchangeNames.length; i++) {
+            if (i == _exchangeNames.length - 1) {
+                placeTrade(
+                    _exchangeNames[i],
+                    _tokens[i],
+                    _tokens[0],
+                    lastReceivedAmount,
+                    0
+                ); // TODO: change the last number;
+            } else {
+                lastReceivedAmount = lastReceivedAmount == 0
+                    ? _amounts[i]
+                    : lastReceivedAmount;
+                lastReceivedAmount = placeTrade(
+                    _exchangeNames[i],
+                    _tokens[i],
+                    _tokens[i + 1],
+                    lastReceivedAmount,
+                    _amounts[i + 1]
+                );
+            }
+        }
+
+        // require(_exchanges.length == 2, "Exchange list must have length 2");
+        // require(_tokens.length == 2, "Tokens list must have length 2");
+        // require(_amounts.length == 3, "Amount list must have length 3");
+
+        // swapTokens(
+        //     _exchanges[0],
+        //     _tokens[0],
+        //     _tokens[1],
+        //     _amounts[0],
+        //     _amounts[1]
+        // );
+
+        // swapTokens(
+        //     _exchanges[1],
+        //     _tokens[1],
+        //     _tokens[0],
+        //     _amounts[1],
+        //     _amounts[2]
+        // );
     }
 
     function flashSwap(
@@ -198,7 +271,7 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
             address[] memory _tokens,
             uint256[] memory _amounts
         ) = abi.decode(userData, (string[], address[], uint256[]));
-        executeArbitrage(_exchanges, _tokens, _amounts);
+        // executeArbitrage(_exchanges, _tokens, _amounts);
 
         uint256 amountToRepay = amounts[0] + feeAmounts[1];
         tokens[0].transfer(address(vault), amountToRepay);
