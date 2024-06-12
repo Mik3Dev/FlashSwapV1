@@ -2,6 +2,7 @@ import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import hre from "hardhat";
 import { expect, assert } from "chai";
 import {
+  BAT_ADDR,
   pancakeswapFactoryAddr,
   pancakeswapRouterAddr,
   sushiswapFactoryAddr,
@@ -249,6 +250,164 @@ describe("FlashSwapUniswapV2 contract", () => {
         flashSwap.connect(owner).withdrawTokens(USDC_ADDR, oneThousand)
       ).to.emit(flashSwap, "WithdrawnTokens");
       expect(await flashSwap.getTokenBalance(USDC_ADDR)).to.equal(0);
+    });
+  });
+
+  describe("Flash Swap", () => {
+    // it("should start arbitrage USDC => WETH => USDC", async () => {
+    //   const { flashSwap, owner } = await loadFixture(deployStoreValueContract);
+    //   await flashSwap.addExchangeRouter(
+    //     "PANCAKESWAP",
+    //     pancakeswapRouterAddr,
+    //     pancakeswapFactoryAddr
+    //   );
+
+    //   const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+    //   const tokens = [ONEINCH_ADDR, WETH_ADDR];
+    //   const amountNumber = 10;
+    //   const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 18);
+
+    //   assert(
+    //     await flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+    //   );
+    // });
+
+    it("should reject a transaction if pair does not exists", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, BAT_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Pool does not exist");
+    });
+
+    it("should reject a transaction if exchange is no registered", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "PANCAKESWAP"];
+      const tokens = [USDC_ADDR, BAT_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Exchange not registered");
+    });
+
+    it("should reject a transaction if exchange list is less than 2", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2"];
+      const tokens = [USDC_ADDR, BAT_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid exchange names length");
+    });
+
+    it("should reject a transaction if token list is less than 2", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid tokens address length");
+    });
+
+    it("should reject a transaction if token list and tokens address lenght mismatch", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP", "PANCAKESWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid lengths");
+    });
+
+    it("should reject a transaction if amount to borrow is zero", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 0;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid borrowed amount");
+    });
+
+    it("should be rejected if trade is not profitable", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Arbitrage not profitable");
+    });
+
+    it("should not call receiveFlashLoan", async () => {
+      const { flashSwap } = await loadFixture(deployStoreValueContract);
+      const tokens = [USDC_ADDR];
+      const amounts = [100];
+      const feeAmounts = [0];
+      const userData = "0x";
+
+      await expect(
+        flashSwap.receiveFlashLoan(tokens, amounts, feeAmounts, userData)
+      ).to.be.rejectedWith("Invalid vault address");
     });
   });
 });

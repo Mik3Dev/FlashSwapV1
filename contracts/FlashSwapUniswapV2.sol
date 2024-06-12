@@ -8,11 +8,16 @@ import {IFlashLoanRecipient} from "@balancer-labs/v2-interfaces/contracts/vault/
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
+import "hardhat/console.sol";
+
 contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
     using SafeERC20 for IERC20;
 
     IVault private constant vault =
         IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
+
+    uint256 private constant MAX_INT =
+        115792089237316195423570985008687907853269984665640564039457584007913129639935;
 
     struct ExchangeInfo {
         address router;
@@ -34,6 +39,7 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         address indexed token,
         uint amount
     );
+    event FlashSwapFinished(uint256 profitAmount);
 
     constructor(address initialAddress) Ownable(initialAddress) {}
 
@@ -133,6 +139,8 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
 
         IUniswapV2Router02 router = IUniswapV2Router02(_exchange.router);
 
+        IERC20(_fromToken).approve(address(_exchange.router), MAX_INT);
+
         address[] memory path = new address[](2);
         path[0] = _fromToken;
         path[1] = _toToken;
@@ -160,7 +168,10 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
     ) internal returns (uint256) {
         require(_exchangeNames.length >= 2, "Invalid exchange names length");
         require(_tokens.length >= 2, "Invalid tokens address length");
-        require(_exchangeNames.length == _tokens.length, "Invalid lengths");
+        require(
+            _exchangeNames.length == _tokens.length,
+            "Mismatch exchange and tokens lengths"
+        );
         require(_amount > 0, "Invalid borrowed amount");
 
         uint256 lastReceivedAmount;
@@ -189,7 +200,7 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         return lastReceivedAmount;
     }
 
-    function flashSwap(
+    function executeflashSwap(
         string[] calldata _exchangeNames,
         address[] calldata _tokens,
         uint256 _amountToBorrow
@@ -207,9 +218,9 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
             _amountToBorrow
         );
 
-        IERC20[] memory tokens;
+        IERC20[] memory tokens = new IERC20[](1);
         tokens[0] = token;
-        uint256[] memory amounts;
+        uint256[] memory amounts = new uint256[](1);
         amounts[0] = _amountToBorrow;
 
         vault.flashLoan(this, tokens, amounts, userData);
@@ -234,10 +245,14 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
             _amountToBorrow
         );
 
-        uint256 amountToRepay = amounts[0] + feeAmounts[1];
-        require(finalAmount - amountToRepay > 0, "Non profitable arbitrage");
+        uint256 amountToRepay = amounts[0] + feeAmounts[0];
 
-        tokens[0].transfer(address(owner()), finalAmount - amountToRepay);
+        require(finalAmount > amountToRepay, "Arbitrage not profitable");
+        uint256 profitAmount = finalAmount - amountToRepay;
+
+        tokens[0].transfer(address(owner()), profitAmount);
         tokens[0].transfer(address(vault), amountToRepay);
+
+        emit FlashSwapFinished(profitAmount);
     }
 }
