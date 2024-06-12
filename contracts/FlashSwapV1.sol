@@ -4,13 +4,15 @@ pragma solidity ^0.8.20;
 import "@balancer-labs/v2-interfaces/contracts/vault/IVault.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
+import "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
+import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {IFlashLoanRecipient} from "@balancer-labs/v2-interfaces/contracts/vault/IFlashLoanRecipient.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import "hardhat/console.sol";
 
-contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
+contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
     using SafeERC20 for IERC20;
 
     IVault private constant vault =
@@ -19,9 +21,17 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
     uint256 private constant MAX_INT =
         115792089237316195423570985008687907853269984665640564039457584007913129639935;
 
+    uint24 public constant POOL_FEE = 3000;
+
+    enum ExchangeType {
+        UNISWAP_V2,
+        UNISWAP_V3
+    }
+
     struct ExchangeInfo {
         address router;
         address factory;
+        ExchangeType exchangeType;
     }
 
     mapping(string => ExchangeInfo) public exchangesInfo;
@@ -50,7 +60,8 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
     function addExchangeRouter(
         string memory _name,
         address _routerAddress,
-        address _factoryAddress
+        address _factoryAddress,
+        ExchangeType _exchangeType
     ) public onlyOwner {
         require(
             exchangesInfo[_name].router == address(0),
@@ -58,7 +69,8 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         );
         exchangesInfo[_name] = ExchangeInfo({
             router: _routerAddress,
-            factory: _factoryAddress
+            factory: _factoryAddress,
+            exchangeType: _exchangeType
         });
         exchanges.push(_name);
     }
@@ -122,6 +134,16 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         emit WithdrawnTokens(msg.sender, token, amount);
     }
 
+    function approveTokenIfNeeded(
+        address token,
+        address spender,
+        uint256 amount
+    ) internal {
+        if (IERC20(token).allowance(address(this), spender) < amount) {
+            IERC20(token).approve(spender, amount);
+        }
+    }
+
     function placeTrade(
         string memory _exchangeName,
         address _fromToken,
@@ -131,32 +153,64 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
         ExchangeInfo memory _exchange = exchangesInfo[_exchangeName];
         require(_exchange.router != address(0), "Exchange not registered");
 
-        address pair = IUniswapV2Factory(_exchange.factory).getPair(
-            _fromToken,
-            _toToken
-        );
-        require(pair != address(0), "Pool does not exist");
-
-        IUniswapV2Router02 router = IUniswapV2Router02(_exchange.router);
-
-        IERC20(_fromToken).approve(address(_exchange.router), MAX_INT);
-
-        address[] memory path = new address[](2);
-        path[0] = _fromToken;
-        path[1] = _toToken;
-
-        uint256 _amountOut = router.getAmountsOut(_amountIn, path)[1];
-
         uint256 deadline = block.timestamp + 1 hours;
+        uint256 amountReceived = 0;
 
-        uint256 amountReceived = router.swapExactTokensForTokens(
-            _amountIn,
-            _amountOut,
-            path,
-            address(this),
-            deadline
-        )[1];
+        if (_exchange.exchangeType == ExchangeType.UNISWAP_V2) {
+            address pair = IUniswapV2Factory(_exchange.factory).getPair(
+                _fromToken,
+                _toToken
+            );
+            require(pair != address(0), "Pool does not exist");
 
+            IUniswapV2Router02 router = IUniswapV2Router02(_exchange.router);
+
+            approveTokenIfNeeded(_fromToken, _exchange.router, _amountIn);
+            approveTokenIfNeeded(_toToken, _exchange.router, _amountIn);
+
+            address[] memory path = new address[](2);
+            path[0] = _fromToken;
+            path[1] = _toToken;
+
+            uint256 _amountOut = router.getAmountsOut(_amountIn, path)[1];
+
+            amountReceived = router.swapExactTokensForTokens(
+                _amountIn,
+                _amountOut,
+                path,
+                address(this),
+                deadline
+            )[1];
+        } else {
+            IQuoter quoter = IQuoter(_exchange.factory);
+            require(address(quoter) != address(0), "Invalid quoter");
+
+            approveTokenIfNeeded(_fromToken, _exchange.router, _amountIn);
+            approveTokenIfNeeded(_toToken, _exchange.router, _amountIn);
+
+            uint256 _amountOut = quoter.quoteExactInputSingle(
+                _fromToken,
+                _toToken,
+                POOL_FEE,
+                _amountIn,
+                0
+            );
+
+            ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+                .ExactInputSingleParams({
+                    tokenIn: _fromToken,
+                    tokenOut: _toToken,
+                    fee: POOL_FEE,
+                    recipient: msg.sender,
+                    deadline: deadline,
+                    amountIn: _amountIn,
+                    amountOutMinimum: _amountOut,
+                    sqrtPriceLimitX96: 0
+                });
+            amountReceived = ISwapRouter(_exchange.router).exactInputSingle(
+                params
+            );
+        }
         require(amountReceived > 0, "Aborted TX: Trade returned zero");
         return amountReceived;
     }
@@ -239,12 +293,12 @@ contract FlashSwapUniswapV2 is Ownable, IFlashLoanRecipient {
             address[] memory _tokens,
             uint256 _amountToBorrow
         ) = abi.decode(userData, (string[], address[], uint256));
+
         uint256 finalAmount = startArbitrage(
             _exchangeNames,
             _tokens,
             _amountToBorrow
         );
-
         uint256 amountToRepay = amounts[0] + feeAmounts[0];
 
         require(finalAmount > amountToRepay, "Arbitrage not profitable");

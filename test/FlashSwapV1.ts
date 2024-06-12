@@ -3,36 +3,40 @@ import hre from "hardhat";
 import { expect, assert } from "chai";
 import {
   BAT_ADDR,
+  CRV_ADDR,
   pancakeswapFactoryAddr,
   pancakeswapRouterAddr,
   sushiswapFactoryAddr,
   sushiswapRouterAddr,
   uniswapV2FactoryAddr,
   uniswapV2RouterAddr,
+  uniswapV3QuoterAddr,
+  uniswapV3SwapRouterAddr,
   USDC_ADDR,
   WETH_ADDR,
 } from "../utils/addresses";
 import { ERC_20_ABI } from "../utils/erc20-abi";
+import { SUSHI_ADDR } from "../utils/addresses";
 
 const nullAddress = "0x0000000000000000000000000000000000000000";
 
-describe("FlashSwapUniswapV2 contract", () => {
+describe("FlashSwapV1 contract", () => {
   async function deployStoreValueContract() {
     const [owner, anotherAccount] = await hre.ethers.getSigners();
 
-    const FlashSwapUniswapV2 = await hre.ethers.getContractFactory(
-      "FlashSwapUniswapV2"
-    );
-    const flashSwap = await FlashSwapUniswapV2.deploy(owner);
+    const FlashSwapV1 = await hre.ethers.getContractFactory("FlashSwapV1");
+    const flashSwap = await FlashSwapV1.deploy(owner);
     await flashSwap.addExchangeRouter(
       "UNISWAP_V2",
       uniswapV2RouterAddr,
-      uniswapV2FactoryAddr
+      uniswapV2FactoryAddr,
+      0
     );
     await flashSwap.addExchangeRouter(
       "SUSHISWAP",
       sushiswapRouterAddr,
-      sushiswapFactoryAddr
+      sushiswapFactoryAddr,
+      0
     );
 
     const usdcContract = new hre.ethers.Contract(
@@ -87,25 +91,29 @@ describe("FlashSwapUniswapV2 contract", () => {
       expect(await flashSwap.exchangesInfo("UNISWAP_V2")).to.deep.equal([
         uniswapV2RouterAddr,
         uniswapV2FactoryAddr,
+        0,
       ]);
       expect(await flashSwap.exchangesInfo("SUSHISWAP")).to.deep.equal([
         sushiswapRouterAddr,
         sushiswapFactoryAddr,
+        0,
       ]);
     });
 
-    it("should the owner set exchange router", async () => {
+    it("should set exchange router by owner account", async () => {
       const { flashSwap } = await loadFixture(deployStoreValueContract);
       await expect(
         flashSwap.addExchangeRouter(
           "PANCAKESWAP",
           pancakeswapRouterAddr,
-          pancakeswapFactoryAddr
+          pancakeswapFactoryAddr,
+          0
         )
       ).not.to.be.rejected;
       expect(await flashSwap.exchangesInfo("PANCAKESWAP")).to.deep.equal([
         pancakeswapRouterAddr,
         pancakeswapFactoryAddr,
+        0,
       ]);
       expect(await flashSwap.getExchanges()).to.deep.equal([
         "UNISWAP_V2",
@@ -114,7 +122,7 @@ describe("FlashSwapUniswapV2 contract", () => {
       ]);
     });
 
-    it("should not allow non owner set exchange router", async () => {
+    it("should not allow to non owner set exchange router", async () => {
       const { flashSwap, anotherAccount } = await loadFixture(
         deployStoreValueContract
       );
@@ -124,12 +132,35 @@ describe("FlashSwapUniswapV2 contract", () => {
           .addExchangeRouter(
             "PANCAKESWAP",
             pancakeswapRouterAddr,
-            pancakeswapFactoryAddr
+            pancakeswapFactoryAddr,
+            0
           )
       ).to.be.rejected;
       expect(await flashSwap.getExchanges()).to.deep.equals([
         "UNISWAP_V2",
         "SUSHISWAP",
+      ]);
+    });
+
+    it("should add a uniswapV3 type exchange", async () => {
+      const { flashSwap } = await loadFixture(deployStoreValueContract);
+      await expect(
+        flashSwap.addExchangeRouter(
+          "UNISWAP_V3",
+          uniswapV3SwapRouterAddr,
+          uniswapV3QuoterAddr,
+          1
+        )
+      ).not.to.be.rejected;
+      expect(await flashSwap.getExchanges()).to.deep.equal([
+        "UNISWAP_V2",
+        "SUSHISWAP",
+        "UNISWAP_V3",
+      ]);
+      expect(await flashSwap.exchangesInfo("UNISWAP_V3")).to.deep.equal([
+        uniswapV3SwapRouterAddr,
+        uniswapV3QuoterAddr,
+        1,
       ]);
     });
 
@@ -141,6 +172,7 @@ describe("FlashSwapUniswapV2 contract", () => {
       expect(await flashSwap.exchangesInfo("SUSHISWAP")).to.deep.equal([
         nullAddress,
         nullAddress,
+        0,
       ]);
     });
 
@@ -158,6 +190,7 @@ describe("FlashSwapUniswapV2 contract", () => {
       expect(await flashSwap.exchangesInfo("SUSHISWAP")).to.deep.equal([
         sushiswapRouterAddr,
         sushiswapFactoryAddr,
+        0,
       ]);
     });
   });
@@ -408,6 +441,50 @@ describe("FlashSwapUniswapV2 contract", () => {
       await expect(
         flashSwap.receiveFlashLoan(tokens, amounts, feeAmounts, userData)
       ).to.be.rejectedWith("Invalid vault address");
+    });
+
+    it("should make a arbitrage from uniswapV2 to uniswapV3", async () => {
+      const { flashSwap } = await loadFixture(deployStoreValueContract);
+      await flashSwap.addExchangeRouter(
+        "UNISWAP_V3",
+        uniswapV3SwapRouterAddr,
+        uniswapV3QuoterAddr,
+        1
+      );
+
+      const exchangeNames = ["UNISWAP_V2", "UNISWAP_V3"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 6);
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Arbitrage not profitable");
+    });
+
+    it("should make a arbitrage from uniswapV3 to uniswapV2", async () => {
+      const { flashSwap, owner } = await loadFixture(deployStoreValueContract);
+      await flashSwap.addExchangeRouter(
+        "UNISWAP_V3",
+        uniswapV3SwapRouterAddr,
+        uniswapV3QuoterAddr,
+        1
+      );
+
+      await owner.sendTransaction({
+        to: await flashSwap.getAddress(),
+        value: hre.ethers.parseEther("1"),
+      });
+
+      console.log("Balance", await flashSwap.getBalance());
+      const exchangeNames = ["UNISWAP_V3", "UNISWAP_V2"];
+      const tokens = [WETH_ADDR, SUSHI_ADDR];
+      const amountNumber = 1;
+      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 18);
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Arbitrage not profitable");
     });
   });
 });

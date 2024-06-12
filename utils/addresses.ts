@@ -20,3 +20,8 @@ export const sushiswapFactoryAddr =
   "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac";
 export const pancakeswapFactoryAddr =
   "0x1097053Fd2ea711dad45caCcc45EfF7548fCB362";
+export const uniswapV3QuoterAddr = "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6";
+export const uniswapV3SwapRouterAddr =
+  "0xE592427A0AEce92De3Edee1F18E0157C05861564";
+export const uniswapV3QuoterV2Addr =
+  "0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
