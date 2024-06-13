@@ -8,7 +8,8 @@ export enum NetworksNames {
 }
 
 const Blocks = {
-  [NetworksNames.ETHEREUM]: 20068293,
+  [NetworksNames.ETHEREUM]: 20066461,
+  // [NetworksNames.ETHEREUM]: 20068293,
   [NetworksNames.POLYGON]: 58028147,
   [NetworksNames.OPTIMISM]: 121253377,
   [NetworksNames.ARBITRUM]: 220714843,

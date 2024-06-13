@@ -3,20 +3,21 @@ import hre from "hardhat";
 import { expect, assert } from "chai";
 import {
   BAT_ADDR,
-  CRV_ADDR,
+  DAI_ADDR,
   pancakeswapFactoryAddr,
   pancakeswapRouterAddr,
   sushiswapFactoryAddr,
   sushiswapRouterAddr,
+  TRAC_ADDR,
   uniswapV2FactoryAddr,
   uniswapV2RouterAddr,
   uniswapV3QuoterAddr,
   uniswapV3SwapRouterAddr,
   USDC_ADDR,
   WETH_ADDR,
+  SUSHI_ADDR,
 } from "../utils/addresses";
 import { ERC_20_ABI } from "../utils/erc20-abi";
-import { SUSHI_ADDR } from "../utils/addresses";
 
 const nullAddress = "0x0000000000000000000000000000000000000000";
 
@@ -287,23 +288,26 @@ describe("FlashSwapV1 contract", () => {
   });
 
   describe("Flash Swap", () => {
-    // it("should start arbitrage USDC => WETH => USDC", async () => {
-    //   const { flashSwap, owner } = await loadFixture(deployStoreValueContract);
-    //   await flashSwap.addExchangeRouter(
-    //     "PANCAKESWAP",
-    //     pancakeswapRouterAddr,
-    //     pancakeswapFactoryAddr
-    //   );
+    it("should execute a arbitrage", async () => {
+      const { flashSwap, owner, wethContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      await flashSwap.addExchangeRouter(
+        "UNISWAP_V3",
+        uniswapV3SwapRouterAddr,
+        uniswapV3QuoterAddr,
+        1
+      );
 
-    //   const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
-    //   const tokens = [ONEINCH_ADDR, WETH_ADDR];
-    //   const amountNumber = 10;
-    //   const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 18);
+      const exchangeNames = ["UNISWAP_V2", "UNISWAP_V3"];
+      const tokens = [WETH_ADDR, TRAC_ADDR];
+      const amountNumber = 0.5813;
+      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 18);
 
-    //   assert(
-    //     await flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
-    //   );
-    // });
+      assert(
+        await flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      );
+    });
 
     it("should reject a transaction if pair does not exists", async () => {
       const { flashSwap, usdcContract } = await loadFixture(
@@ -476,11 +480,29 @@ describe("FlashSwapV1 contract", () => {
         value: hre.ethers.parseEther("1"),
       });
 
-      console.log("Balance", await flashSwap.getBalance());
       const exchangeNames = ["UNISWAP_V3", "UNISWAP_V2"];
-      const tokens = [WETH_ADDR, SUSHI_ADDR];
-      const amountNumber = 1;
-      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 18);
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const amountNumber = 1000;
+      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 6);
+
+      await expect(
+        flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Arbitrage not profitable");
+    });
+
+    it("should make a swap between three dex", async () => {
+      const { flashSwap } = await loadFixture(deployStoreValueContract);
+      await flashSwap.addExchangeRouter(
+        "UNISWAP_V3",
+        uniswapV3SwapRouterAddr,
+        uniswapV3QuoterAddr,
+        1
+      );
+
+      const exchangeNames = ["UNISWAP_V2", "UNISWAP_V3", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR, DAI_ADDR];
+      const amountNumber = 1000;
+      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 6);
 
       await expect(
         flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)

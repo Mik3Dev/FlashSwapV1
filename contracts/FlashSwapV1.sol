@@ -165,14 +165,14 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
 
             IUniswapV2Router02 router = IUniswapV2Router02(_exchange.router);
 
-            approveTokenIfNeeded(_fromToken, _exchange.router, _amountIn);
-            approveTokenIfNeeded(_toToken, _exchange.router, _amountIn);
-
             address[] memory path = new address[](2);
             path[0] = _fromToken;
             path[1] = _toToken;
 
             uint256 _amountOut = router.getAmountsOut(_amountIn, path)[1];
+
+            approveTokenIfNeeded(_fromToken, _exchange.router, _amountIn);
+            approveTokenIfNeeded(_toToken, _exchange.router, _amountOut);
 
             amountReceived = router.swapExactTokensForTokens(
                 _amountIn,
@@ -185,9 +185,6 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
             IQuoter quoter = IQuoter(_exchange.factory);
             require(address(quoter) != address(0), "Invalid quoter");
 
-            approveTokenIfNeeded(_fromToken, _exchange.router, _amountIn);
-            approveTokenIfNeeded(_toToken, _exchange.router, _amountIn);
-
             uint256 _amountOut = quoter.quoteExactInputSingle(
                 _fromToken,
                 _toToken,
@@ -196,21 +193,24 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
                 0
             );
 
+            approveTokenIfNeeded(_fromToken, _exchange.router, _amountIn);
+            approveTokenIfNeeded(_toToken, _exchange.router, _amountOut);
+
+            ISwapRouter swapRouter = ISwapRouter(_exchange.router);
             ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
                 .ExactInputSingleParams({
                     tokenIn: _fromToken,
                     tokenOut: _toToken,
                     fee: POOL_FEE,
-                    recipient: msg.sender,
+                    recipient: address(this),
                     deadline: deadline,
                     amountIn: _amountIn,
                     amountOutMinimum: _amountOut,
                     sqrtPriceLimitX96: 0
                 });
-            amountReceived = ISwapRouter(_exchange.router).exactInputSingle(
-                params
-            );
+            amountReceived = swapRouter.exactInputSingle(params);
         }
+        // console.log("Received Amount", amountReceived);
         require(amountReceived > 0, "Aborted TX: Trade returned zero");
         return amountReceived;
     }
@@ -300,9 +300,13 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
             _amountToBorrow
         );
         uint256 amountToRepay = amounts[0] + feeAmounts[0];
+        // console.log("Initial Amount", _amountToBorrow);
+        // console.log("Amount to repay", amountToRepay);
+        // console.log("Final Amount", finalAmount);
 
         require(finalAmount > amountToRepay, "Arbitrage not profitable");
         uint256 profitAmount = finalAmount - amountToRepay;
+        // console.log("Profit", profitAmount);
 
         tokens[0].transfer(address(owner()), profitAmount);
         tokens[0].transfer(address(vault), amountToRepay);
