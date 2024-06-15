@@ -9,19 +9,23 @@ import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {IFlashLoanRecipient} from "@balancer-labs/v2-interfaces/contracts/vault/IFlashLoanRecipient.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "@aave/core-v3/contracts/interfaces/IPool.sol";
+import "@aave/core-v3/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol";
+import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 import "./DEXRegistry.sol";
 
 import "hardhat/console.sol";
 
-contract FlashSwapV1 is Ownable, IFlashLoanRecipient, DEXRegistry {
+contract FlashSwapV1 is
+    Ownable,
+    DEXRegistry,
+    IFlashLoanRecipient,
+    FlashLoanSimpleReceiverBase
+{
     using SafeERC20 for IERC20;
-
-    IVault private constant vault =
-        IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
-
+    IVault private immutable vault;
     uint256 private constant MAX_INT =
         115792089237316195423570985008687907853269984665640564039457584007913129639935;
-
     uint24 public constant POOL_FEE = 3000;
 
     event ReceivedETH(address indexed sender, uint amount);
@@ -38,7 +42,19 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient, DEXRegistry {
     );
     event FlashSwapFinished(uint256 profitAmount);
 
-    constructor(address initialAddress) Ownable(initialAddress) {}
+    constructor(
+        address initialAddress,
+        address _addresProviderBalancer,
+        address _addressProviderAAVE
+    )
+        Ownable(initialAddress)
+        FlashLoanSimpleReceiverBase(
+            IPoolAddressesProvider(_addressProviderAAVE)
+        )
+    {
+        // vault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
+        vault = IVault(_addresProviderBalancer);
+    }
 
     function addDEX(
         string memory _name,
@@ -164,7 +180,6 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient, DEXRegistry {
                 });
             amountReceived = swapRouter.exactInputSingle(params);
         }
-        // console.log("Received Amount", amountReceived);
         require(amountReceived > 0, "Aborted TX: Trade returned zero");
         return amountReceived;
     }
@@ -266,5 +281,55 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient, DEXRegistry {
         tokens[0].transfer(address(vault), amountToRepay);
 
         emit FlashSwapFinished(profitAmount);
+    }
+
+    function executeflashSwapAAVE(
+        string[] calldata _exchangeNames,
+        address[] calldata _tokens,
+        uint256 _amountToBorrow
+    ) public onlyOwner {
+        bytes memory userData = abi.encode(
+            _exchangeNames,
+            _tokens,
+            _amountToBorrow
+        );
+        POOL.flashLoanSimple(
+            address(this),
+            _tokens[0],
+            _amountToBorrow,
+            userData,
+            0
+        );
+    }
+
+    function executeOperation(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        address initiator,
+        bytes calldata params
+    ) external returns (bool) {
+        require(initiator == address(this), "Initiator mismatch");
+
+        (
+            string[] memory _exchangeNames,
+            address[] memory _tokens,
+            uint256 _amountToBorrow
+        ) = abi.decode(params, (string[], address[], uint256));
+
+        require(asset == _tokens[0], "Token mismatch");
+
+        uint256 finalAmount = startArbitrage(
+            _exchangeNames,
+            _tokens,
+            _amountToBorrow
+        );
+        uint256 amountToRepay = amount + premium;
+        uint256 profitAmount = finalAmount - amountToRepay;
+        approveTokenIfNeeded(asset, address(POOL), amountToRepay);
+        approveTokenIfNeeded(asset, address(owner()), profitAmount);
+        IERC20(asset).transfer(address(owner()), profitAmount);
+
+        return true;
     }
 }

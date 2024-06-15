@@ -2,6 +2,8 @@ import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import hre from "hardhat";
 import { expect, assert } from "chai";
 import {
+  aaveProviderAddr,
+  balancerProviderAddr,
   BAT_ADDR,
   DAI_ADDR,
   pancakeswapFactoryAddr,
@@ -25,7 +27,11 @@ describe("FlashSwapV1 contract", () => {
     const [owner, anotherAccount] = await hre.ethers.getSigners();
 
     const FlashSwapV1 = await hre.ethers.getContractFactory("FlashSwapV1");
-    const flashSwap = await FlashSwapV1.deploy(owner);
+    const flashSwap = await FlashSwapV1.deploy(
+      owner,
+      balancerProviderAddr,
+      aaveProviderAddr
+    );
     await flashSwap.addDEX(
       "UNISWAP_V2",
       uniswapV2RouterAddr,

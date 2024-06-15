@@ -26,3 +26,7 @@ export const uniswapV3SwapRouterAddr =
   "0xE592427A0AEce92De3Edee1F18E0157C05861564";
 export const uniswapV3QuoterV2Addr =
   "0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
+
+export const balancerProviderAddr =
+  "0xBA12222222228d8Ba445958a75a0704d566BF2C8";
+export const aaveProviderAddr = "0x2f39d218133AFaB8F2B819B1066c7E434Ad94E9e";
