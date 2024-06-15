@@ -290,7 +290,7 @@ describe("FlashSwapV1 contract", () => {
     });
   });
 
-  describe("Flash Swap", () => {
+  describe("Balancer Flash Swap", () => {
     it("should execute a arbitrage", async () => {
       const { flashSwap, owner, wethContract } = await loadFixture(
         deployStoreValueContract
@@ -509,6 +509,193 @@ describe("FlashSwapV1 contract", () => {
 
       await expect(
         flashSwap.executeflashSwap(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Arbitrage not profitable");
+    });
+  });
+
+  describe("AAVE Flash Swap", () => {
+    // TODO: Success test case
+
+    it("should reject a transaction if pair does not exists", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, BAT_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Pool does not exist");
+    });
+
+    it("should reject a transaction if exchange is no registered", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "PANCAKESWAP"];
+      const tokens = [USDC_ADDR, BAT_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Exchange not registered");
+    });
+
+    it("should reject a transaction if exchange list is less than 2", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2"];
+      const tokens = [USDC_ADDR, BAT_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid exchange names length");
+    });
+
+    it("should reject a transaction if token list is less than 2", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid tokens address length");
+    });
+
+    it("should reject a transaction if token list and tokens address lenght mismatch", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP", "PANCAKESWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid lengths");
+    });
+
+    it("should reject a transaction if amount to borrow is zero", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 0;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Invalid borrowed amount");
+    });
+
+    it("should be rejected if trade is not profitable", async () => {
+      const { flashSwap, usdcContract } = await loadFixture(
+        deployStoreValueContract
+      );
+      const exchangeNames = ["UNISWAP_V2", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const usdcDecimals = await usdcContract.decimals();
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(
+        amountNumber.toString(),
+        usdcDecimals
+      );
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Arbitrage not profitable");
+    });
+
+    it("should not call executeOperation of AAVE protocol", async () => {
+      const { flashSwap } = await loadFixture(deployStoreValueContract);
+      const initiator = await flashSwap.getAddress();
+      const amount = 100;
+      const premium = 0;
+      const userData = "0x";
+
+      // TODO: validate the rejection reason
+      await expect(
+        flashSwap.executeOperation(
+          USDC_ADDR,
+          amount,
+          premium,
+          initiator,
+          userData
+        )
+      ).to.be.rejected;
+    });
+
+    it("should make a arbitrage from uniswapV2 to uniswapV3", async () => {
+      const { flashSwap } = await loadFixture(deployStoreValueContract);
+      await flashSwap.addDEX(
+        "UNISWAP_V3",
+        uniswapV3SwapRouterAddr,
+        uniswapV3QuoterAddr,
+        1
+      );
+
+      const exchangeNames = ["UNISWAP_V2", "UNISWAP_V3"];
+      const tokens = [USDC_ADDR, WETH_ADDR];
+      const amountNumber = 10_000;
+      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 6);
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
+      ).to.be.rejectedWith("Arbitrage not profitable");
+    });
+
+    it("should make a swap between three dex", async () => {
+      const { flashSwap } = await loadFixture(deployStoreValueContract);
+      await flashSwap.addDEX(
+        "UNISWAP_V3",
+        uniswapV3SwapRouterAddr,
+        uniswapV3QuoterAddr,
+        1
+      );
+
+      const exchangeNames = ["UNISWAP_V2", "UNISWAP_V3", "SUSHISWAP"];
+      const tokens = [USDC_ADDR, WETH_ADDR, DAI_ADDR];
+      const amountNumber = 1000;
+      const amountToBorrow = hre.ethers.parseUnits(amountNumber.toString(), 6);
+
+      await expect(
+        flashSwap.executeflashSwapAAVE(exchangeNames, tokens, amountToBorrow)
       ).to.be.rejectedWith("Arbitrage not profitable");
     });
   });

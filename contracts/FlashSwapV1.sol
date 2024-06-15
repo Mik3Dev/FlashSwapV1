@@ -288,6 +288,11 @@ contract FlashSwapV1 is
         address[] calldata _tokens,
         uint256 _amountToBorrow
     ) public onlyOwner {
+        require(_exchangeNames.length >= 2, "Invalid exchange names length");
+        require(_tokens.length >= 2, "Invalid tokens address length");
+        require(_exchangeNames.length == _tokens.length, "Invalid lengths");
+        require(_amountToBorrow > 0, "Invalid borrowed amount");
+
         bytes memory userData = abi.encode(
             _exchangeNames,
             _tokens,
@@ -310,7 +315,6 @@ contract FlashSwapV1 is
         bytes calldata params
     ) external returns (bool) {
         require(initiator == address(this), "Initiator mismatch");
-
         (
             string[] memory _exchangeNames,
             address[] memory _tokens,
@@ -325,6 +329,8 @@ contract FlashSwapV1 is
             _amountToBorrow
         );
         uint256 amountToRepay = amount + premium;
+        require(finalAmount > amountToRepay, "Arbitrage not profitable");
+
         uint256 profitAmount = finalAmount - amountToRepay;
         approveTokenIfNeeded(asset, address(POOL), amountToRepay);
         approveTokenIfNeeded(asset, address(owner()), profitAmount);
