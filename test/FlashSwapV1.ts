@@ -15,7 +15,6 @@ import {
   uniswapV3SwapRouterAddr,
   USDC_ADDR,
   WETH_ADDR,
-  SUSHI_ADDR,
 } from "../utils/addresses";
 import { ERC_20_ABI } from "../utils/erc20-abi";
 
@@ -27,13 +26,13 @@ describe("FlashSwapV1 contract", () => {
 
     const FlashSwapV1 = await hre.ethers.getContractFactory("FlashSwapV1");
     const flashSwap = await FlashSwapV1.deploy(owner);
-    await flashSwap.addExchangeRouter(
+    await flashSwap.addDEX(
       "UNISWAP_V2",
       uniswapV2RouterAddr,
       uniswapV2FactoryAddr,
       0
     );
-    await flashSwap.addExchangeRouter(
+    await flashSwap.addDEX(
       "SUSHISWAP",
       sushiswapRouterAddr,
       sushiswapFactoryAddr,
@@ -80,115 +79,113 @@ describe("FlashSwapV1 contract", () => {
     });
   });
 
-  describe("Exchange routers", () => {
-    it("should returns list of registered exchanges", async () => {
+  describe("DEX registry", () => {
+    it("should returns list of registered dexes", async () => {
       const { flashSwap } = await loadFixture(deployStoreValueContract);
 
-      expect(await flashSwap.getExchanges()).to.deep.equals([
+      expect(await flashSwap.getDEXs()).to.deep.equals([
         "UNISWAP_V2",
         "SUSHISWAP",
       ]);
 
-      expect(await flashSwap.exchangesInfo("UNISWAP_V2")).to.deep.equal([
+      expect(await flashSwap.dexInfo("UNISWAP_V2")).to.deep.equal([
         uniswapV2RouterAddr,
         uniswapV2FactoryAddr,
         0,
       ]);
-      expect(await flashSwap.exchangesInfo("SUSHISWAP")).to.deep.equal([
+      expect(await flashSwap.dexInfo("SUSHISWAP")).to.deep.equal([
         sushiswapRouterAddr,
         sushiswapFactoryAddr,
         0,
       ]);
     });
 
-    it("should set exchange router by owner account", async () => {
+    it("should register a dex by owner account", async () => {
       const { flashSwap } = await loadFixture(deployStoreValueContract);
       await expect(
-        flashSwap.addExchangeRouter(
+        flashSwap.addDEX(
           "PANCAKESWAP",
           pancakeswapRouterAddr,
           pancakeswapFactoryAddr,
           0
         )
       ).not.to.be.rejected;
-      expect(await flashSwap.exchangesInfo("PANCAKESWAP")).to.deep.equal([
+      expect(await flashSwap.dexInfo("PANCAKESWAP")).to.deep.equal([
         pancakeswapRouterAddr,
         pancakeswapFactoryAddr,
         0,
       ]);
-      expect(await flashSwap.getExchanges()).to.deep.equal([
+      expect(await flashSwap.getDEXs()).to.deep.equal([
         "UNISWAP_V2",
         "SUSHISWAP",
         "PANCAKESWAP",
       ]);
     });
 
-    it("should not allow to non owner set exchange router", async () => {
+    it("should not allow to register a dex to another accounts (non owner)", async () => {
       const { flashSwap, anotherAccount } = await loadFixture(
         deployStoreValueContract
       );
       await expect(
         flashSwap
           .connect(anotherAccount)
-          .addExchangeRouter(
+          .addDEX(
             "PANCAKESWAP",
             pancakeswapRouterAddr,
             pancakeswapFactoryAddr,
             0
           )
       ).to.be.rejected;
-      expect(await flashSwap.getExchanges()).to.deep.equals([
+      expect(await flashSwap.getDEXs()).to.deep.equals([
         "UNISWAP_V2",
         "SUSHISWAP",
       ]);
     });
 
-    it("should add a uniswapV3 type exchange", async () => {
+    it("should add a uniswapV3 type dex", async () => {
       const { flashSwap } = await loadFixture(deployStoreValueContract);
       await expect(
-        flashSwap.addExchangeRouter(
+        flashSwap.addDEX(
           "UNISWAP_V3",
           uniswapV3SwapRouterAddr,
           uniswapV3QuoterAddr,
           1
         )
       ).not.to.be.rejected;
-      expect(await flashSwap.getExchanges()).to.deep.equal([
+      expect(await flashSwap.getDEXs()).to.deep.equal([
         "UNISWAP_V2",
         "SUSHISWAP",
         "UNISWAP_V3",
       ]);
-      expect(await flashSwap.exchangesInfo("UNISWAP_V3")).to.deep.equal([
+      expect(await flashSwap.dexInfo("UNISWAP_V3")).to.deep.equal([
         uniswapV3SwapRouterAddr,
         uniswapV3QuoterAddr,
         1,
       ]);
     });
 
-    it("should allow to owner to remove exchange", async () => {
+    it("should allow to owner to remove dex", async () => {
       const { flashSwap } = await loadFixture(deployStoreValueContract);
-      await expect(flashSwap.removeExchangeRouter("SUSHISWAP")).not.to.be
-        .rejected;
-      expect(await flashSwap.getExchanges()).to.deep.equals(["UNISWAP_V2"]);
-      expect(await flashSwap.exchangesInfo("SUSHISWAP")).to.deep.equal([
+      await expect(flashSwap.removeDEX("SUSHISWAP")).not.to.be.rejected;
+      expect(await flashSwap.getDEXs()).to.deep.equals(["UNISWAP_V2"]);
+      expect(await flashSwap.dexInfo("SUSHISWAP")).to.deep.equal([
         nullAddress,
         nullAddress,
         0,
       ]);
     });
 
-    it("should not allow remove exchange to non owner account", async () => {
+    it("should not allow remove dex to another (non owner)", async () => {
       const { flashSwap, anotherAccount } = await loadFixture(
         deployStoreValueContract
       );
-      await expect(
-        flashSwap.connect(anotherAccount).removeExchangeRouter("SUSHISWAP")
-      ).to.be.rejected;
-      expect(await flashSwap.getExchanges()).to.deep.equals([
+      await expect(flashSwap.connect(anotherAccount).removeDEX("SUSHISWAP")).to
+        .be.rejected;
+      expect(await flashSwap.getDEXs()).to.deep.equals([
         "UNISWAP_V2",
         "SUSHISWAP",
       ]);
-      expect(await flashSwap.exchangesInfo("SUSHISWAP")).to.deep.equal([
+      expect(await flashSwap.dexInfo("SUSHISWAP")).to.deep.equal([
         sushiswapRouterAddr,
         sushiswapFactoryAddr,
         0,
@@ -292,7 +289,7 @@ describe("FlashSwapV1 contract", () => {
       const { flashSwap, owner, wethContract } = await loadFixture(
         deployStoreValueContract
       );
-      await flashSwap.addExchangeRouter(
+      await flashSwap.addDEX(
         "UNISWAP_V3",
         uniswapV3SwapRouterAddr,
         uniswapV3QuoterAddr,
@@ -449,7 +446,7 @@ describe("FlashSwapV1 contract", () => {
 
     it("should make a arbitrage from uniswapV2 to uniswapV3", async () => {
       const { flashSwap } = await loadFixture(deployStoreValueContract);
-      await flashSwap.addExchangeRouter(
+      await flashSwap.addDEX(
         "UNISWAP_V3",
         uniswapV3SwapRouterAddr,
         uniswapV3QuoterAddr,
@@ -468,7 +465,7 @@ describe("FlashSwapV1 contract", () => {
 
     it("should make a arbitrage from uniswapV3 to uniswapV2", async () => {
       const { flashSwap, owner } = await loadFixture(deployStoreValueContract);
-      await flashSwap.addExchangeRouter(
+      await flashSwap.addDEX(
         "UNISWAP_V3",
         uniswapV3SwapRouterAddr,
         uniswapV3QuoterAddr,
@@ -492,7 +489,7 @@ describe("FlashSwapV1 contract", () => {
 
     it("should make a swap between three dex", async () => {
       const { flashSwap } = await loadFixture(deployStoreValueContract);
-      await flashSwap.addExchangeRouter(
+      await flashSwap.addDEX(
         "UNISWAP_V3",
         uniswapV3SwapRouterAddr,
         uniswapV3QuoterAddr,

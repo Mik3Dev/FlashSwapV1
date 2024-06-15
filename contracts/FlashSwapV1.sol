@@ -9,10 +9,11 @@ import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {IFlashLoanRecipient} from "@balancer-labs/v2-interfaces/contracts/vault/IFlashLoanRecipient.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "./DEXRegistry.sol";
 
 import "hardhat/console.sol";
 
-contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
+contract FlashSwapV1 is Ownable, IFlashLoanRecipient, DEXRegistry {
     using SafeERC20 for IERC20;
 
     IVault private constant vault =
@@ -22,20 +23,6 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
         115792089237316195423570985008687907853269984665640564039457584007913129639935;
 
     uint24 public constant POOL_FEE = 3000;
-
-    enum ExchangeType {
-        UNISWAP_V2,
-        UNISWAP_V3
-    }
-
-    struct ExchangeInfo {
-        address router;
-        address factory;
-        ExchangeType exchangeType;
-    }
-
-    mapping(string => ExchangeInfo) public exchangesInfo;
-    string[] public exchanges;
 
     event ReceivedETH(address indexed sender, uint amount);
     event WithdrawETH(address indexed recipient, uint amount);
@@ -53,55 +40,22 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
 
     constructor(address initialAddress) Ownable(initialAddress) {}
 
-    function getExchanges() public view returns (string[] memory) {
-        return exchanges;
-    }
-
-    function addExchangeRouter(
+    function addDEX(
         string memory _name,
         address _routerAddress,
         address _factoryAddress,
-        ExchangeType _exchangeType
-    ) public onlyOwner {
-        require(
-            exchangesInfo[_name].router == address(0),
-            "Aready registered exchange router"
+        DEXType _exchangeType
+    ) public override onlyOwner {
+        DEXRegistry.addDEX(
+            _name,
+            _routerAddress,
+            _factoryAddress,
+            _exchangeType
         );
-        exchangesInfo[_name] = ExchangeInfo({
-            router: _routerAddress,
-            factory: _factoryAddress,
-            exchangeType: _exchangeType
-        });
-        exchanges.push(_name);
     }
 
-    function _findExchangeName(
-        string memory _name
-    ) private view returns (uint, bool) {
-        for (uint i = 0; i < exchanges.length; i++) {
-            if (
-                keccak256(abi.encodePacked(exchanges[i])) ==
-                keccak256(abi.encodePacked(_name))
-            ) {
-                return (i, true);
-            }
-        }
-        return (0, false);
-    }
-
-    function _removeExchangeName(string memory _name) private {
-        (uint index, bool found) = _findExchangeName(_name);
-        require(found, "Element not found");
-
-        for (uint i = index; i < exchanges.length - 1; i++) {
-            exchanges[i] = exchanges[i + 1];
-        }
-        exchanges.pop();
-    }
-
-    function removeExchangeRouter(string memory _name) public onlyOwner {
-        delete exchangesInfo[_name];
-        _removeExchangeName(_name);
+    function removeDEX(string memory _name) public override onlyOwner {
+        DEXRegistry.removeDEX(_name);
     }
 
     receive() external payable {
@@ -150,13 +104,13 @@ contract FlashSwapV1 is Ownable, IFlashLoanRecipient {
         address _toToken,
         uint256 _amountIn
     ) private returns (uint256) {
-        ExchangeInfo memory _exchange = exchangesInfo[_exchangeName];
+        DEXInfo memory _exchange = dexInfo[_exchangeName];
         require(_exchange.router != address(0), "Exchange not registered");
 
         uint256 deadline = block.timestamp + 1 hours;
         uint256 amountReceived = 0;
 
-        if (_exchange.exchangeType == ExchangeType.UNISWAP_V2) {
+        if (_exchange.dexType == DEXType.UNISWAP_V2) {
             address pair = IUniswapV2Factory(_exchange.factory).getPair(
                 _fromToken,
                 _toToken
